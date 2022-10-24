@@ -1,55 +1,47 @@
 /* USER CODE BEGIN Header */
 /**
-  
-******************************************************************************
+  ******************************************************************************
   * @file           : main.c
   * @brief          : Main program body
-  
-******************************************************************************
+  ******************************************************************************
   * @attention
   *
   * Copyright (c) 2022 STMicroelectronics.
   * All rights reserved.
   *
-  * This software is licensed under terms that can be found in the LICENSE 
-file
+  * This software is licensed under terms that can be found in the LICENSE file
   * in the root directory of this software component.
   * If no LICENSE file comes with this software, it is provided AS-IS.
   *
-  
-******************************************************************************
+  ******************************************************************************
   */
 /* USER CODE END Header */
-/* Includes 
-------------------------------------------------------------------*/
+/* Includes ------------------------------------------------------------------*/
 #include "main.h"
 
-/* Private includes 
-----------------------------------------------------------*/
+/* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include <stdio.h>
 #include <string.h>
 /* USER CODE END Includes */
 
-/* Private typedef 
------------------------------------------------------------*/
+/* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
 
 /* USER CODE END PTD */
 
-/* Private define 
-------------------------------------------------------------*/
+/* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 /* USER CODE END PD */
 
-/* Private macro 
--------------------------------------------------------------*/
+/* Private macro -------------------------------------------------------------*/
 /* USER CODE BEGIN PM */
 
 /* USER CODE END PM */
 
-/* Private variables 
----------------------------------------------------------*/
+/* Private variables ---------------------------------------------------------*/
+ADC_HandleTypeDef hadc1;
+
 I2C_HandleTypeDef hi2c1;
 
 UART_HandleTypeDef huart2;
@@ -58,19 +50,33 @@ UART_HandleTypeDef huart2;
 
 /* USER CODE END PV */
 
-/* Private function prototypes 
------------------------------------------------*/
+/* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_USART2_UART_Init(void);
 static void MX_I2C1_Init(void);
+static void MX_ADC1_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
 
-/* Private user code 
----------------------------------------------------------*/
+/* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+
+float round(float num, int precision){  // precision==100 for 2 decimal places
+	float multiplier{precision*1.0};
+
+	num = num * multiplier;
+	int num_int = num;
+
+	if (num - num_int > 0.5) {
+		num_int += 1;
+	}
+
+	num = num_int / 100.0;
+
+	return num;
+}
 
 /* USER CODE END 0 */
 
@@ -84,11 +90,9 @@ int main(void)
 	uint8_t buf[12];
   /* USER CODE END 1 */
 
-  /* MCU 
-Configuration--------------------------------------------------------*/
+  /* MCU Configuration--------------------------------------------------------*/
 
-  /* Reset of all peripherals, Initializes the Flash interface and the 
-Systick. */
+  /* Reset of all peripherals, Initializes the Flash interface and the Systick. */
   HAL_Init();
 
   /* USER CODE BEGIN Init */
@@ -106,6 +110,7 @@ Systick. */
   MX_GPIO_Init();
   MX_USART2_UART_Init();
   MX_I2C1_Init();
+  MX_ADC1_Init();
   /* USER CODE BEGIN 2 */
 
   /* USER CODE END 2 */
@@ -114,28 +119,59 @@ Systick. */
   /* USER CODE BEGIN WHILE */
 
   // Declare global variables
-  char ph_msg[15]{"pH is xx.xx!\r\n"};  // String that prints to terminal 
-with pH value
+  char ph_msg[15]{"pH is xx.xx!\r\n"};  // String that prints to terminal with pH value
   float ph_val{};  // Used to store pH value from 0.00 to 14.00
   int ph_sig{};
-  int ph_dec{};
+  int ph_dec1{};
+  int ph_dec2{};
 
-  while (1)
+
+//  HAL_ADC_Start(&hadc1);
+  unsigned int ph_analog_in;
+
+
+  while (1)  // Bathroom tap water: 3490 to 3520
   {
-	  // Read pH sensor and convert to value from 0.00 to 14.00
-	  ph_val = 0;
+
+	  // Read pH sensor analog input and convert to value from 0.00 to 14.00
+	  HAL_ADC_Start(&hadc1);
+	  if(HAL_ADC_PollForConversion(&hadc1, 10) == HAL_OK){
+		  ph_analog_in = HAL_ADC_GetValue(&hadc1);
+	  }
+	  HAL_ADC_Stop(&hadc1);
+
+	  ph_val = (ph_analog_in / 4096.0) * 14.0;
+	  ph_val = round(ph_val, 100);  // Round pH value to two digits
+
 
 	  // Get int representations of ph_val for terminal printing
-	  ph_sig = ph_val;
-	  ph_dec = ph_val*100 - ph_sig*100;
+	  ph_sig = ph_val;  // truncated ph value (int)
+	  ph_dec1 = ph_val*10 - ph_sig*10;  // first decimal of pH value
+	  ph_dec2 = (ph_val*100 - ph_sig*100);  // second decimal of pH value
+	  ph_dec2 = ph_dec2 % 10;
 
-	  sprintf(ph_msg, "pH is %d.%d!\r\n", ph_sig, ph_dec);
+
+	  /* For Testing:
+
+	  int p{ph_analog_in};
+
+	  sprintf(ph_msg, "pH is %d!\r\n", p);
 
 	  // Write Data to Terminal
 	  strcpy((char*)buf, ph_msg);
-	  HAL_UART_Transmit(&huart2, buf, strlen((char*)buf), 
-HAL_MAX_DELAY);
-	  HAL_Delay(500);
+	  HAL_UART_Transmit(&huart2, buf, strlen((char*)buf), HAL_MAX_DELAY);
+
+	  */
+
+	  sprintf(ph_msg, "pH is %d.%d%d!\r\n", ph_sig, ph_dec1, ph_dec2);
+
+	  // Write Data to Terminal
+	  strcpy((char*)buf, ph_msg);
+	  HAL_UART_Transmit(&huart2, buf, strlen((char*)buf), HAL_MAX_DELAY);
+
+
+	  // Delay every loop iteration
+	  HAL_Delay(1000);
 
 
     /* USER CODE END WHILE */
@@ -159,8 +195,7 @@ void SystemClock_Config(void)
   __HAL_RCC_PWR_CLK_ENABLE();
   __HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE2);
 
-  /** Initializes the RCC Oscillators according to the specified 
-parameters
+  /** Initializes the RCC Oscillators according to the specified parameters
   * in the RCC_OscInitTypeDef structure.
   */
   RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI;
@@ -190,6 +225,58 @@ parameters
   {
     Error_Handler();
   }
+}
+
+/**
+  * @brief ADC1 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_ADC1_Init(void)
+{
+
+  /* USER CODE BEGIN ADC1_Init 0 */
+
+  /* USER CODE END ADC1_Init 0 */
+
+  ADC_ChannelConfTypeDef sConfig = {0};
+
+  /* USER CODE BEGIN ADC1_Init 1 */
+
+  /* USER CODE END ADC1_Init 1 */
+
+  /** Configure the global features of the ADC (Clock, Resolution, Data Alignment and number of conversion)
+  */
+  hadc1.Instance = ADC1;
+  hadc1.Init.ClockPrescaler = ADC_CLOCK_SYNC_PCLK_DIV4;
+  hadc1.Init.Resolution = ADC_RESOLUTION_12B;
+  hadc1.Init.ScanConvMode = DISABLE;
+  hadc1.Init.ContinuousConvMode = DISABLE;
+  hadc1.Init.DiscontinuousConvMode = DISABLE;
+  hadc1.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_NONE;
+  hadc1.Init.ExternalTrigConv = ADC_SOFTWARE_START;
+  hadc1.Init.DataAlign = ADC_DATAALIGN_RIGHT;
+  hadc1.Init.NbrOfConversion = 1;
+  hadc1.Init.DMAContinuousRequests = DISABLE;
+  hadc1.Init.EOCSelection = ADC_EOC_SINGLE_CONV;
+  if (HAL_ADC_Init(&hadc1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  /** Configure for the selected ADC regular channel its corresponding rank in the sequencer and its sample time.
+  */
+  sConfig.Channel = ADC_CHANNEL_1;
+  sConfig.Rank = 1;
+  sConfig.SamplingTime = ADC_SAMPLETIME_3CYCLES;
+  if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN ADC1_Init 2 */
+
+  /* USER CODE END ADC1_Init 2 */
+
 }
 
 /**
@@ -303,8 +390,7 @@ static void MX_GPIO_Init(void)
 void Error_Handler(void)
 {
   /* USER CODE BEGIN Error_Handler_Debug */
-  /* User can add his own implementation to report the HAL error return 
-state */
+  /* User can add his own implementation to report the HAL error return state */
   __disable_irq();
   while (1)
   {
@@ -323,11 +409,8 @@ state */
 void assert_failed(uint8_t *file, uint32_t line)
 {
   /* USER CODE BEGIN 6 */
-  /* User can add his own implementation to report the file name and line 
-number,
-     ex: printf("Wrong parameters value: file %s on line %d\r\n", file, 
-line) */
+  /* User can add his own implementation to report the file name and line number,
+     ex: printf("Wrong parameters value: file %s on line %d\r\n", file, line) */
   /* USER CODE END 6 */
 }
 #endif /* USE_FULL_ASSERT */
-
