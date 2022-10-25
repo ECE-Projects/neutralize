@@ -63,6 +63,19 @@ static void MX_ADC1_Init(void);
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 
+
+// ENVIRONMENT VARIABLES
+const float NEUTRALIZER_FLOW_RATE{8};  // mL per second of the solenoid valve and neutralizer
+const float CRITICAL_PH{6.8};
+const int DELAY_INTERVAL{500};  // milliseconds to wait between every pH sensor check
+// Set to 10 for testing, 500 for production
+const int CONFIRMATIONS_NEEDED{500};  // number of times the system should check for consistent pH before releasing neutralizer
+// Set to 5*1000 for testing, 60*60*1000 for production
+const int SUSPEND_TIME{60*60*1000};  // milliseconds to suspend the system for after releasing neutralizer
+
+// Global Variables
+uint8_t buf[64];  // For HUART terminal printing
+
 float round(float num, int precision){  // precision==100 for 2 decimal places
 	float multiplier{precision*1.0};
 
@@ -78,6 +91,33 @@ float round(float num, int precision){  // precision==100 for 2 decimal places
 	return num;
 }
 
+
+void release_neutralizer(float volume){  // volume must be given in mL
+	float duration{};  // duration (seconds) of keeping the valve open to release neutralizer
+
+	duration = volume / NEUTRALIZER_FLOW_RATE;
+	int int_duration = duration * 1000;  // milliseconds
+
+	// Print to terminal
+	int int_vol{volume};
+	char neutralizer_msg[45];
+	sprintf(neutralizer_msg, "%dmL of neutralizer is being released!\r\n", int_vol);
+	strcpy((char*)buf, neutralizer_msg);
+	HAL_UART_Transmit(&huart2, buf, strlen((char*)buf), 150);
+
+	// Turn on solenoid for set duration
+	HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_SET);
+
+	HAL_Delay(int_duration);
+
+	HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_RESET);
+
+	// Print to terminal
+	sprintf(neutralizer_msg, "%dmL of neutralizer has been released!\r\n", int_vol);
+	strcpy((char*)buf, neutralizer_msg);
+	HAL_UART_Transmit(&huart2, buf, strlen((char*)buf), 150);
+}
+
 /* USER CODE END 0 */
 
 /**
@@ -87,7 +127,6 @@ float round(float num, int precision){  // precision==100 for 2 decimal places
 int main(void)
 {
   /* USER CODE BEGIN 1 */
-	uint8_t buf[12];
   /* USER CODE END 1 */
 
   /* MCU Configuration--------------------------------------------------------*/
@@ -118,19 +157,23 @@ int main(void)
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
 
-  // Declare global variables
+  // Declare variables for main
   char ph_msg[15]{"pH is xx.xx!\r\n"};  // String that prints to terminal with pH value
   float ph_val{};  // Used to store pH value from 0.00 to 14.00
   int ph_sig{};
   int ph_dec1{};
   int ph_dec2{};
-
-
-//  HAL_ADC_Start(&hadc1);
   unsigned int ph_analog_in;
 
+  int ph_confirmations{0};
 
-  while (1)  // Bathroom tap water: 3490 to 3520
+  /*
+   * Solenoid: PB_4 = Pin D5
+   * pH Sensor: PA1 = Pin A1
+   */
+
+
+  while (1)
   {
 
 	  // Read pH sensor analog input and convert to value from 0.00 to 14.00
@@ -151,27 +194,34 @@ int main(void)
 	  ph_dec2 = ph_dec2 % 10;
 
 
-	  /* For Testing:
-
-	  int p{ph_analog_in};
-
-	  sprintf(ph_msg, "pH is %d!\r\n", p);
-
 	  // Write Data to Terminal
-	  strcpy((char*)buf, ph_msg);
-	  HAL_UART_Transmit(&huart2, buf, strlen((char*)buf), HAL_MAX_DELAY);
-
-	  */
-
 	  sprintf(ph_msg, "pH is %d.%d%d!\r\n", ph_sig, ph_dec1, ph_dec2);
-
-	  // Write Data to Terminal
 	  strcpy((char*)buf, ph_msg);
-	  HAL_UART_Transmit(&huart2, buf, strlen((char*)buf), HAL_MAX_DELAY);
+	  HAL_UART_Transmit(&huart2, buf, strlen((char*)buf), 150);
+
+
+	  // Check if ph_val is at a critical level
+	  if (ph_val <= CRITICAL_PH) {
+		  ++ph_confirmations;
+	  } else {
+		  ph_confirmations = 0;
+	  }
+
+	  if (ph_confirmations == CONFIRMATIONS_NEEDED) {
+		  // CALCULATION OF HOW MUCH NEUTRALIZER IS NEEDED
+		  // Using: ph_val, water_volume, neutralization_ratio, neutralizer_concentration
+		  float neutralizer_volume{100.0};  // Required volume of neutralizer in mL to fully neutralize the water
+
+		  release_neutralizer(neutralizer_volume);
+
+		  ph_confirmations = 0;
+		  HAL_Delay(SUSPEND_TIME);  // Suspend the system after releasing neutralizer
+	  }
+
 
 
 	  // Delay every loop iteration
-	  HAL_Delay(1000);
+	  HAL_Delay(DELAY_INTERVAL);
 
 
     /* USER CODE END WHILE */
@@ -364,6 +414,9 @@ static void MX_GPIO_Init(void)
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_RESET);
 
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_RESET);
+
   /*Configure GPIO pin : B1_Pin */
   GPIO_InitStruct.Pin = B1_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
@@ -376,6 +429,13 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(LD2_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : PB4 */
+  GPIO_InitStruct.Pin = GPIO_PIN_4;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
 }
 
