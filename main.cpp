@@ -92,6 +92,24 @@ float round(float num, int precision){  // precision==100 for 2 decimal places
 }
 
 
+float neutralizer_volume (float ph_val, float water_volume, float neutralization_ratio, float neutralizer_concentration){
+
+    float concentration_H;
+    concentration_H = pow(10, -ph_val);
+
+    float moles_H;
+    moles_H = water_volume*concentration_H;
+
+    float moles_limestone;
+    moles_limestone = moles_H*0.5;
+
+    float volume_neutralizer;
+    volume_neutralizer = moles_limestone/10.0;
+
+    return volume_neutralizer; 
+}
+
+
 void release_neutralizer(float volume){  // volume must be given in mL
 	float duration{};  // duration (seconds) of keeping the valve open to release neutralizer
 
