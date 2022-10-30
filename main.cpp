@@ -23,6 +23,8 @@
 /* USER CODE BEGIN Includes */
 #include <stdio.h>
 #include <string.h>
+#include <iostream>
+#include <math.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -68,10 +70,22 @@ static void MX_ADC1_Init(void);
 const float NEUTRALIZER_FLOW_RATE{8};  // mL per second of the solenoid valve and neutralizer
 const float CRITICAL_PH{6.8};
 const int DELAY_INTERVAL{500};  // milliseconds to wait between every pH sensor check
+
 // Set to 10 for testing, 500 for production
 const int CONFIRMATIONS_NEEDED{500};  // number of times the system should check for consistent pH before releasing neutralizer
+
 // Set to 5*1000 for testing, 60*60*1000 for production
 const int SUSPEND_TIME{60*60*1000};  // milliseconds to suspend the system for after releasing neutralizer
+
+// Set to 100,000 L by default
+const float WATER_VOLUME{100000.0 * 1000.0};  // Volume of water that is managed by the system (mL)
+
+// Set to 0.5 for limestone
+const float NEUTRALIZATION_RATIO{0.5};  // Stoicheometric ratio of moles of the neutralizer to moles of H+ ions
+
+// Set to 1.0 for limestone
+const float NEUTRALIZER_CONCENTRATION{1.0};  // Concentration of OH- ions in the neutralizing solution
+
 
 // Global Variables
 uint8_t buf[64];  // For HUART terminal printing
@@ -101,12 +115,12 @@ float neutralizer_volume (float ph_val, float water_volume, float neutralization
     moles_H = water_volume*concentration_H;
 
     float moles_limestone;
-    moles_limestone = moles_H*0.5;
+    moles_limestone = moles_H*neutralization_ratio;
 
     float volume_neutralizer;
-    volume_neutralizer = moles_limestone/10.0;
+    volume_neutralizer = moles_limestone/neutralizer_concentration;
 
-    return volume_neutralizer; 
+	return volume_neutralizer;
 }
 
 
@@ -123,12 +137,12 @@ void release_neutralizer(float volume){  // volume must be given in mL
 	strcpy((char*)buf, neutralizer_msg);
 	HAL_UART_Transmit(&huart2, buf, strlen((char*)buf), 150);
 
-	// Turn on solenoid for set duration
-	HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_SET);
+	// Turn on solenoid for set duration (when D5 is OFF, solenoid is ON)
+	HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_RESET);
 
 	HAL_Delay(int_duration);
 
-	HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_RESET);
+	HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_SET);
 
 	// Print to terminal
 	sprintf(neutralizer_msg, "%dmL of neutralizer has been released!\r\n", int_vol);
@@ -145,6 +159,7 @@ void release_neutralizer(float volume){  // volume must be given in mL
 int main(void)
 {
   /* USER CODE BEGIN 1 */
+
   /* USER CODE END 1 */
 
   /* MCU Configuration--------------------------------------------------------*/
@@ -169,6 +184,7 @@ int main(void)
   MX_I2C1_Init();
   MX_ADC1_Init();
   /* USER CODE BEGIN 2 */
+  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_SET);  // Turn D5 ON so that Solenoid is OFF
 
   /* USER CODE END 2 */
 
@@ -228,9 +244,10 @@ int main(void)
 	  if (ph_confirmations == CONFIRMATIONS_NEEDED) {
 		  // CALCULATION OF HOW MUCH NEUTRALIZER IS NEEDED
 		  // Using: ph_val, water_volume, neutralization_ratio, neutralizer_concentration
-		  float neutralizer_volume{100.0};  // Required volume of neutralizer in mL to fully neutralize the water
+		  float neutralizer_vol{};  // Required volume of neutralizer in mL to fully neutralize the water
+		  neutralizer_vol = neutralizer_volume(ph_val, WATER_VOLUME, NEUTRALIZATION_RATIO, NEUTRALIZER_CONCENTRATION);
 
-		  release_neutralizer(neutralizer_volume);
+		  release_neutralizer(neutralizer_vol);
 
 		  ph_confirmations = 0;
 		  HAL_Delay(SUSPEND_TIME);  // Suspend the system after releasing neutralizer
